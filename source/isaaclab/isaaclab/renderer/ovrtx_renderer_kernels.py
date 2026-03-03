@@ -78,6 +78,44 @@ def extract_depth_tile_from_tiled_buffer_kernel(
     tile_buffer[y, x, 0] = tiled_buffer[src_y, src_x]
 
 
+@wp.func
+def _crc32_byte(crc: wp.uint32, byte: wp.uint32) -> wp.uint32:
+    """One byte step of CRC32 (bit-by-bit, standard reflected polynomial)."""
+    CRC32_POLY = wp.uint32(0xEDB88320)
+
+    crc = crc ^ byte
+
+    for _ in range(8):
+        if (crc & wp.uint32(1)) != wp.uint32(0):
+            crc = (crc >> wp.uint32(1)) ^ CRC32_POLY
+        else:
+            crc = crc >> wp.uint32(1)
+
+    return crc
+
+
+@wp.kernel
+def compute_crc32_hash_kernel(
+    input_data: wp.array(dtype=wp.uint32, ndim=2),  # type: ignore
+    output_hash: wp.array(dtype=wp.uint32, ndim=2),  # type: ignore
+):
+    """Compute a deterministic CRC32 hash per pixel (uint32 -> uint32)."""
+    i, j = wp.tid()
+    value_uint32 = input_data[i, j]
+
+    crc = wp.uint32(0xFFFFFFFF)
+
+    # Extract 4 bytes (little-endian: LSB first, same order as standard CRC32)
+    for _ in range(4):
+        byte = value_uint32 & wp.uint32(0xFF)
+        crc = _crc32_byte(crc, byte)
+        value_uint32 = value_uint32 >> wp.uint32(8)
+
+    crc = crc ^ wp.uint32(0xFFFFFFFF)
+
+    output_hash[i, j] = crc
+
+
 @wp.kernel
 def sync_newton_transforms_kernel(
     ovrtx_transforms: wp.array(dtype=wp.mat44d),  # type: ignore
